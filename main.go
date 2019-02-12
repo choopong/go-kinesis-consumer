@@ -65,7 +65,7 @@ func main() {
 		putOutput, err = kc.PutRecord(&kinesis.PutRecordInput{
 			Data:         []byte("hoge"),
 			StreamName:   streamName,
-			PartitionKey: aws.String("key1"),
+			PartitionKey: aws.String("PIM-product"),
 		})
 		if err != nil {
 			panic(err)
@@ -75,10 +75,12 @@ func main() {
 	// Consume Records
 	if CONSUME {
 		iteratorOutput, err := kc.GetShardIterator(&kinesis.GetShardIteratorInput{
-			ShardId:                aws.String("shardId-000000000000"),
-			ShardIteratorType:      aws.String("AFTER_SEQUENCE_NUMBER"),
-			StartingSequenceNumber: aws.String(LAST_SEQ_NUMER),
-			StreamName:             streamName,
+			ShardId: aws.String("shardId-000000000000"),
+			// ShardIteratorType:      aws.String("AFTER_SEQUENCE_NUMBER"),
+			// ShardIteratorType: aws.String("LATEST"),
+			ShardIteratorType: aws.String("TRIM_HORIZON"),
+			// StartingSequenceNumber: aws.String(LAST_SEQ_NUMER),
+			StreamName: streamName,
 		})
 		if err != nil {
 			panic(err)
@@ -87,10 +89,14 @@ func main() {
 		records, err := kc.GetRecords(&kinesis.GetRecordsInput{
 			ShardIterator: iteratorOutput.ShardIterator,
 		})
+
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("%v\n", records)
+		// fmt.Printf("%v\n", records)
+		for _, record := range records.Records {
+			fmt.Printf("%v\n", string(record.Data[:]))
+		}
 	}
 
 	// Delete

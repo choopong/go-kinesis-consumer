@@ -7,13 +7,12 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kinesis"
 )
 
 const CREATE = false
-const DESCRIBE = false
+const DESCRIBE = true
 const PRODUCE = false
 const CONSUME = true
 const DELETE = false
@@ -26,10 +25,11 @@ func main() {
 	log.Println("Starting...")
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String("ap-southeast-1"),
-		Credentials: credentials.NewSharedCredentials("", "cg-pim"),
+		Credentials: credentials.NewSharedCredentials("", "pim-kinesis"),
 	}))
-	creds := stscreds.NewCredentials(sess, "arn:aws:iam::102991414667:role/r_aws-admin")
-	kc := kinesis.New(sess, &aws.Config{Credentials: creds})
+	// creds := stscreds.NewCredentials(sess, "arn:aws:iam::102991414667:role/r_aws-admin")
+	// kc := kinesis.New(sess, &aws.Config{Credentials: creds})
+	kc := kinesis.New(sess)
 	streamName := aws.String(*stream)
 
 	// Create Stream
@@ -45,6 +45,7 @@ func main() {
 	}
 
 	// Connect Stream
+	log.Println("Waiting stream...")
 	if err := kc.WaitUntilStreamExists(&kinesis.DescribeStreamInput{StreamName: streamName}); err != nil {
 		panic(err)
 	}

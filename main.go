@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -12,17 +13,17 @@ import (
 )
 
 const CREATE = false
-const DESCRIBE = true
-const PRODUCE = false
-const CONSUME = true
+const DESCRIBE = false
+const PRODUCE = true
+const CONSUME = false
 const DELETE = false
 
-const LAST_SEQ_NUMER = "49592896276015172091846676797947732156385634425793150978"
+var lastTimestampByShardId = map[string]time.Time{}
 
 var stream = flag.String("stream", "PIM-product-info-dev", "")
 
 func main() {
-	log.Println("Starting...")
+	fmt.Println("Starting...")
 	sess := session.Must(session.NewSession(&aws.Config{
 		Region:      aws.String("ap-southeast-1"),
 		Credentials: credentials.NewSharedCredentials("", "pim-kinesis"),
@@ -63,8 +64,9 @@ func main() {
 	var putOutput *kinesis.PutRecordOutput
 	var err error
 	if PRODUCE {
+		now := time.Now().Local()
 		putOutput, err = kc.PutRecord(&kinesis.PutRecordInput{
-			Data:         []byte("hoge"),
+			Data:         []byte(now.Format(time.RFC3339)),
 			StreamName:   streamName,
 			PartitionKey: aws.String("PIM-product"),
 		})
@@ -73,30 +75,49 @@ func main() {
 		}
 		fmt.Printf("%v\n", putOutput)
 	}
+
 	// Consume Records
 	if CONSUME {
-		iteratorOutput, err := kc.GetShardIterator(&kinesis.GetShardIteratorInput{
-			ShardId: aws.String("shardId-000000000000"),
-			// ShardIteratorType:      aws.String("AFTER_SEQUENCE_NUMBER"),
-			// ShardIteratorType: aws.String("LATEST"),
-			ShardIteratorType: aws.String("TRIM_HORIZON"),
-			// StartingSequenceNumber: aws.String(LAST_SEQ_NUMER),
-			StreamName: streamName,
-		})
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("%v\n", iteratorOutput)
-		records, err := kc.GetRecords(&kinesis.GetRecordsInput{
-			ShardIterator: iteratorOutput.ShardIterator,
-		})
+		for {
+			listShardsOutput, err := kc.ListShards(&kinesis.ListShardsInput{
+				StreamName: streamName,
+			})
+			if err != nil {
+				panic(err)
+			}
+			// fmt.Printf("%v\n", listShardsOutput)
 
-		if err != nil {
-			panic(err)
-		}
-		// fmt.Printf("%v\n", records)
-		for _, record := range records.Records {
-			fmt.Printf("%v\n", string(record.Data[:]))
+			for _, shard := range listShardsOutput.Shards {
+				var iteratorOutput *kinesis.GetShardIteratorOutput
+				var err error
+				if lastTimestamp, ok := lastTimestampByShardId[*shard.ShardId]; ok {
+					iteratorOutput, err = kc.GetShardIterator(&kinesis.GetShardIteratorInput{
+						ShardId: shard.ShardId,
+						// ShardIteratorType: aws.String("LATEST"),
+						// ShardIteratorType: aws.String("TRIM_HORIZON"),
+						// ShardIteratorType: aws.String("AFTER_SEQUENCE_NUMBER"),
+						// ShardIteratorType:      aws.String("AT_SEQUENCE_NUMBER"),
+						ShardIteratorType: aws.String("AT_TIMESTAMP"),
+						Timestamp:         &lastTimestamp,
+						StreamName:        streamName,
+					})
+				} else {
+					iteratorOutput, err = kc.GetShardIterator(&kinesis.GetShardIteratorInput{
+						ShardId: shard.ShardId,
+						// ShardIteratorType: aws.String("LATEST"),
+						ShardIteratorType: aws.String("TRIM_HORIZON"),
+						StreamName:        streamName,
+					})
+				}
+				if err != nil {
+					panic(err)
+				}
+				// fmt.Printf("%v\n", *shard.ShardId)
+				// fmt.Printf("%v\n", iteratorOutput)
+				getRecords(kc, iteratorOutput.ShardIterator)
+				lastTimestampByShardId[*shard.ShardId] = time.Now()
+			}
+			time.Sleep(1 * time.Second)
 		}
 	}
 
@@ -109,5 +130,23 @@ func main() {
 			panic(err)
 		}
 		fmt.Printf("%v\n", deleteOutput)
+	}
+}
+
+func getRecords(kc *kinesis.Kinesis, shardIterator *string) {
+	records, err := kc.GetRecords(&kinesis.GetRecordsInput{
+		ShardIterator: shardIterator,
+	})
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Printf("%v\n", records)
+	fmt.Print(".")
+	for _, record := range records.Records {
+		fmt.Printf("\n%v\n", string(record.Data[:]))
+		// fmt.Printf("%v\n", *record.SequenceNumber)
+	}
+	if *records.MillisBehindLatest != 0 && records.NextShardIterator != nil {
+		getRecords(kc, records.NextShardIterator)
 	}
 }
